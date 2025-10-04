@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Java 17
+- Java 18
 - Maven 3.6+
 
 ## Features
@@ -11,6 +11,7 @@
 - Different types of coupons (Cart-wise, Product-wise, BXGY)
 - Coupon validation and application
 - Cart total calculation with applied discounts
+- Coupon expiration dates (optional, inclusive of the given date)
 
 ## API Documentation
 
@@ -30,6 +31,8 @@ Once the application is running, you can access:
 4. Check applicable coupons for a sample cart
 5. Apply a specific coupon to the cart using its ID
 6. Optionally update/delete a coupon
+
+Note: When creating or updating a coupon, you can optionally provide an `expiry_date` (YYYY-MM-DD). If set, the coupon is valid through that date; after that it won’t appear in applicable results and cannot be applied.
 
 ## Database
 
@@ -151,63 +154,59 @@ curl -sS -X POST http://localhost:8080/api/apply-coupon/<ID> \
 
 ### Implemented Cases
 
-- Cart-wise percentage discount over an optional threshold.
-- Product-wise percentage discount for a specific `product_id`.
-- BxGy deals with:
-  - Multiple eligible "buy" products with required quantities.
-  - Multiple "get" products with free quantities.
-  - Repetition limit applied to the number of times the pattern can be fulfilled.
-- Computation of applicable coupons and per-item breakdown when applying a coupon.
+- Cart-wide percentage discount that kicks in once a (optional) spend threshold is crossed.
+- Product-specific percentage discount targeting a single `product_id`.
+- Buy X Get Y (BxGy) offers that support:
+  - Multiple eligible “buy” products with required quantities.
+  - Multiple “get” products and free quantities.
+  - A repetition cap to limit how many times the deal applies.
+- Automatic calculation of which coupons apply and a simple per-item discount breakdown when a coupon is applied.
+- Optional coupon expiration date: expired coupons are hidden from applicable lists and cannot be applied.
 
 ### Unimplemented / Partially Implemented Cases (Design Considerations)
 
-- Stackability/combination of multiple coupons in one apply call (currently only one coupon is applied at a time).
-- Priority/conflict resolution across coupons when multiple apply.
-- Category/brand-based constraints; user-segment constraints; channel constraints.
-- Min/max discount caps, absolute amount discounts, and tiered discounts.
-- Product exclusions within cart-wise coupons.
-- BxGy with cheapest-item free among a set, or choosing from products not present in the cart (current logic only discounts items already in cart as free additions in quantity).
-- Coupon codes vs. auto-applied promotions; usage limits per user/global; redemption tracking.
-- Coupon scheduling: start/end time windows; time zones; advanced expiry semantics beyond a simple date.
-- Currency handling and tax-inclusive/exclusive price handling.
-- Inventory awareness, partial fulfillment, and returns/refunds adjustments.
+- Stacking multiple coupons in a single apply request. Today we only allow one coupon per apply call. Example: applying a cart-wide 10% and a product-wise 20% together would need stacking rules (order of application, etc.).
+- Priority and conflict handling when more than one coupon could apply. If two coupons target the same items, we need a deterministic way to pick which one wins (e.g., highest discount, business priority, or user choice).
+- Min/max discount caps, absolute (fixed-amount) discounts, and tiered discounts. For example, “10% off up to $50” (max cap) or “$30 flat off” (absolute) or “5% up to $100, then 10%” (tiered).
+- Product exclusions for cart-wide coupons. Allow cart-wide promos to skip specific SKUs or categories, e.g., “10% off everything except gift cards.”
+- BxGy variants like “cheapest item free” or granting free items not already in the cart. Current BxGy only discounts items that are already present in the cart.
+- Coupon codes vs. auto-applied promos, per-user/global usage limits, and redemption tracking. Needed to control abuse and support marketing campaigns (e.g., first-time user only, max 1 use per user).
+- Scheduling beyond a simple expiry date. Support start windows, time zones, blackout periods, and more complex calendars.
+- Currency and tax configuration (tax-inclusive vs. tax-exclusive pricing). Real-world carts often require country-specific tax behavior and conversions.
+- Inventory awareness, partial fulfillment rules, and returns/refunds adjustments. Discounts may need to adapt if items are out of stock or returned.
 
 ### Assumptions
 
-- Prices in the cart are pre-tax and use the same currency.
-- Cart items are identified by `product_id` and carry `price` and `quantity` at request time.
-- For BxGy, free items are calculated only for `get_products` that are present in the cart; their quantity is increased accordingly in the response.
-- Percentages are provided as whole numbers (e.g., 10 means 10%).
-- H2 in-memory database is used; data resets on each app restart.
+- Each cart item includes `product_id`, `price`, and `quantity` in the request. The service does not look up a product catalog; it trusts the request payload(I know this is wrong, but implemented it as MVP).
+- For BxGy, free quantities are only granted for `get_products` already present in the cart. We increase that line’s quantity to reflect the free items.
+- Percentage inputs are whole numbers (e.g., `10` means 10%). No fractional percentages are expected.
+- H2 in-memory database is used; data is reset on each app restart. But ideally, I would use a proper database.
 
 ### Limitations
 
-- No persistence of products/catalog; cart is a transient request payload.
-- Floating/rounding uses 2 decimals with HALF_UP; may differ from business expectations.
-- No authentication/authorization.
-- Error handling is basic; validation messages and not-found errors are provided, but no error codes taxonomy.
-- Currency, taxes, shipping, and coupons interaction with them are out of scope.
+- No product/catalog persistence. We do not store product data; callers must provide prices and quantities in each request, which may allow inconsistent pricing across calls.
+- Monetary rounding uses 2 decimals with HALF_UP. Some businesses prefer different rounding strategies, which can change totals slightly.
+- No authentication or authorization. Any client can call the endpoints in this demo setup.
+- Basic error handling only. We return validation messages and not-found errors, but there’s no standardized error code scheme yet.
+- No scope for currency, taxes, and shipping interactions. Real order totals often depend on these; they’re intentionally omitted here to keep the focus on coupon logic.
 
 ### Data Model Overview (as used by the API)
 
-- `Coupon` entity persisted with fields: `id`, `name`, `type` (enum: `CART_WISE`, `PRODUCT_WISE`, `BXGY`), `detailsJson` (serialized form of `CouponDtos.Details`).
-- `CouponDtos.Details` supports:
-  - `threshold`, `discount` for cart-wise.
-  - `product_id`, `discount` for product-wise.
-  - `buy_products[]`, `get_products[]`, `repetition_limit` for BxGy.
-- `CartDto` contains `items[]` with `product_id`, `quantity`, `price`.
+- `Coupon` is stored with: `id`, `name`, `type` (one of `CART_WISE`, `PRODUCT_WISE`, `BXGY`), `detailsJson` (the typed details saved as JSON), and optional `expiryDate`.
+- `CouponDtos.Details` carries the inputs needed for each type:
+  - Cart-wise: `threshold` (optional minimum spend) and `discount` (percent).
+  - Product-wise: `product_id` (target item) and `discount` (percent).
+  - BxGy: `buy_products[]` and `get_products[]` (product+quantity pairs) and an optional `repetition_limit`.
+- `CartDto` represents the incoming cart: `items[]` with `product_id`, `quantity`, and `price`. The service computes totals and discounts from this payload.
 
 ### Error Handling
 
 - `404` when a coupon is not found.
 - Validation errors for invalid payloads (e.g., missing required fields, negative quantities, etc.).
-- `POST /api/applicable-coupons` returns only coupons with positive computed discounts.
 
 ### Testing Notes
 
-- Unit tests can be added around `CouponService` methods:
-  - `applicableCartWise`, `applicableProductWise`, `applicableBxGy` for correctness and edge cases.
-  - `computeBxGyRepetitions` for repetition calculations and limit application.
+- Unit tests are added in `CouponServiceTest`.
 
 ### Extensibility
 

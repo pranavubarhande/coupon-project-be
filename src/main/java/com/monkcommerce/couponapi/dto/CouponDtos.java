@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.util.List;
+import java.time.LocalDate;
 
 public class CouponDtos {
 
@@ -16,6 +17,8 @@ public class CouponDtos {
         private String name;
         @NotNull
         private Details details;
+        // Optional: coupon is valid through this date (inclusive). If null, no expiry.
+        private LocalDate expiry_date;
 
         public CouponType getType() { return type; }
         public void setType(CouponType type) { this.type = type; }
@@ -23,6 +26,8 @@ public class CouponDtos {
         public void setName(String name) { this.name = name; }
         public Details getDetails() { return details; }
         public void setDetails(Details details) { this.details = details; }
+        public LocalDate getExpiry_date() { return expiry_date; }
+        public void setExpiry_date(LocalDate expiry_date) { this.expiry_date = expiry_date; }
     }
 
     public static class UpdateCouponRequest extends CreateCouponRequest { }
@@ -71,6 +76,7 @@ public class CouponDtos {
         private String name;
         private CouponType type;
         private Details details;
+        private LocalDate expiry_date;
 
         public Long getId() { return id; }
         public void setId(Long id) { this.id = id; }
@@ -80,7 +86,7 @@ public class CouponDtos {
         public void setType(CouponType type) { this.type = type; }
         public Details getDetails() { return details; }
         public void setDetails(Details details) { this.details = details; }
+        public LocalDate getExpiry_date() { return expiry_date; }
+        public void setExpiry_date(LocalDate expiry_date) { this.expiry_date = expiry_date; }
     }
 }
-
-

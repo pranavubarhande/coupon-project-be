@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
+import java.time.LocalDate;
 
 @Service
 public class CouponService {
@@ -31,6 +32,7 @@ public class CouponService {
         coupon.setName(req.getName());
         coupon.setType(req.getType());
         coupon.setDetailsJson(writeJson(req.getDetails()));
+        coupon.setExpiryDate(req.getExpiry_date());
         return couponRepository.save(coupon);
     }
 
@@ -40,6 +42,7 @@ public class CouponService {
         coupon.setName(req.getName());
         coupon.setType(req.getType());
         coupon.setDetailsJson(writeJson(req.getDetails()));
+        coupon.setExpiryDate(req.getExpiry_date());
         return couponRepository.save(coupon);
     }
 
@@ -69,6 +72,7 @@ public class CouponService {
         BigDecimal total = cartTotal(cart);
         List<Map<String, Object>> result = new ArrayList<>();
         for (Coupon coupon : couponRepository.findAll()) {
+            if (isExpired(coupon)) continue;
             CouponDtos.Details d = readDetails(coupon);
             BigDecimal discount = switch (coupon.getType()) {
                 case CART_WISE -> applicableCartWise(total, d);
@@ -84,6 +88,11 @@ public class CouponService {
             }
         }
         return result;
+    }
+
+    private boolean isExpired(Coupon coupon) {
+        LocalDate expiry = coupon.getExpiryDate();
+        return expiry != null && LocalDate.now().isAfter(expiry);
     }
 
     private BigDecimal applicableCartWise(BigDecimal total, CouponDtos.Details d) {
@@ -136,6 +145,9 @@ public class CouponService {
 
     public Map<String, Object> applyCoupon(Long id, CartDto cart) {
         Coupon coupon = get(id);
+        if (isExpired(coupon)) {
+            throw new IllegalArgumentException("Coupon has expired");
+        }
         CouponDtos.Details d = readDetails(coupon);
         Map<String, Object> response = new LinkedHashMap<>();
 
